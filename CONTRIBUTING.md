@@ -8,6 +8,22 @@ Azure provider on top.
 > Code contributions are limited to Microsoft employees at this time. Anyone can report
 > a bug or request a feature through [GitHub Issues](../../issues).
 
+## Experimental customer fork
+
+`yuchenwang-spi/osdu-spi-entitlements` is a customer fork of
+[`Azure/osdu-spi-entitlements`](https://github.com/Azure/osdu-spi-entitlements).
+`@yuchen-wang99` owns reviews for this experimental repository.
+
+The default branch retains the upstream review and CI requirements. The owner has an
+explicit pull-request-only bypass for experimental merges, including self-authored
+pull requests that GitHub does not allow the author to approve. This bypass does not
+permit direct or force pushes to `main`.
+
+Customer synchronization uses `SYNC_MODE=mirror`. The reviewer configuration in
+`.github/CODEOWNERS` and the bypass in `.github/rulesets/default-branch.json` are
+intentional downstream differences. Preserve them when resolving synchronization
+conflicts, and keep this fork's governance changes out of upstream feature pull requests.
+
 ## Where a change belongs
 
 This tree has three owners; [`.github/CODEOWNERS`](.github/CODEOWNERS) maps the paths.
