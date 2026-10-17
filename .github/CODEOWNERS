@@ -13,6 +13,7 @@
 
 # Fork-owned Azure source, descriptor, and filter config.
 /provider/entitlements-v2-azure/      @Azure/azure-global-energy
+/provider/gremlin-shaded-fix/         @Azure/azure-global-energy
 /testing/entitlements-v2-test-azure/  @Azure/azure-global-energy
 /.spi/                          @Azure/azure-global-energy
 /.github/upstream-filter.yml    @Azure/azure-global-energy
