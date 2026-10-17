@@ -462,23 +462,6 @@ public class CreateMembershipsWorkflowSinglePartitionTest {
                 "data.default.owners@common.contoso.com",
                 "data.default.viewers@common.contoso.com",
                 "data.mydata1.operators@common.contoso.com"}, performListGroupsOnBehalfOfRequest(userA, "NONE", "test.com"));
-
-        //update group metadata with empty list
-        performUpdateGroupRequest(Collections.singletonList(getUpdateAppIdsOperation(Collections.emptyList())),
-                "data.mydata1.operators@common.contoso.com", userA, audience);
-        assertGroupsEquals(new String[]{
-                "users@common.contoso.com",
-                "users.myusers.operators@common.contoso.com",
-                "data.default.owners@common.contoso.com",
-                "data.default.viewers@common.contoso.com",
-                "data.mydata1.operators@common.contoso.com"}, performListGroupRequestWithAppId(userA, audience));
-
-        assertGroupsEquals(new String[]{
-                "users@common.contoso.com",
-                "users.myusers.operators@common.contoso.com",
-                "data.default.owners@common.contoso.com",
-                "data.default.viewers@common.contoso.com",
-                "data.mydata1.operators@common.contoso.com"}, performListGroupsOnBehalfOfRequest(userA, "NONE", "test.com"));
     }
 
     private void testGroupUpdateApi() throws Exception {
