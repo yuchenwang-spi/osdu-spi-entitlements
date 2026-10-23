@@ -20,7 +20,6 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.AdditionalAnswers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.stubbing.Answer;
@@ -58,6 +57,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
@@ -194,12 +194,10 @@ public class GroupCacheServiceAzureTest {
 
     @Test
     public void shouldOnlyOneThreadRebuildCacheInConcurrentScenarioAndOtherThreadWaitAndReturnTheRebuiltCache() throws InterruptedException {
-        List<ParentReferences> cacheValues = new ArrayList<>();
-        for (int i = 0; i < 15; i++) {
-            cacheValues.add(null);
-        }
-        cacheValues.add(this.parentReferences);
-        when(this.redisGroupCache.get("requesterId1-dp")).thenAnswer(AdditionalAnswers.returnsElementsOf(cacheValues));
+        // returnsElementsOf is not thread-safe; concurrent readers can drain the final element
+        AtomicInteger cacheReads = new AtomicInteger();
+        when(this.redisGroupCache.get("requesterId1-dp"))
+                .thenAnswer(invocationOnMock -> cacheReads.incrementAndGet() > 15 ? this.parentReferences : null);
         when(this.retrieveGroupRepo.loadAllParents(this.requester1, false)).thenAnswer((Answer<ParentTreeDto>) invocationOnMock -> {
             await().pollDelay(Duration.FIVE_SECONDS).until(() -> true);
             return parentTreeDto;

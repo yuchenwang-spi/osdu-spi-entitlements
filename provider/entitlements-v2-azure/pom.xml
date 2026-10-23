@@ -20,23 +20,25 @@
 
   <modelVersion>4.0.0</modelVersion>
   <artifactId>entitlements-v2-azure</artifactId>
-  <version>0.31.0-SNAPSHOT</version>
+  <version>${revision}</version>
   <description>Entitlements V2 service on Azure</description>
   <packaging>jar</packaging>
 
   <parent>
     <artifactId>entitlements-v2-service</artifactId>
     <groupId>org.opengroup.osdu.entitlements.v2</groupId>
-    <version>0.31.0-SNAPSHOT</version>
+    <version>${revision}</version>
     <relativePath>../../pom.xml</relativePath>
   </parent>
 
   <properties>
-    <core-lib-azure.version>3.0.1</core-lib-azure.version>
+    <core-lib-azure.version>4.0.0</core-lib-azure.version>
+    <!-- Root pom pins lettuce explicitly, which beats the core-lib-azure BOM; match the library here -->
+    <lettuce.version>7.9.0.RELEASE</lettuce.version>
     <slf4j.version>2.0.20</slf4j.version>
-    <gremlin.version>3.8.0</gremlin.version>
-    <java-jwt.version>4.5.0</java-jwt.version>
-    <commons-configuration2.version>2.15.0</commons-configuration2.version>
+    <gremlin.version>3.8.2</gremlin.version>
+    <java-jwt.version>4.5.2</java-jwt.version>
+    <commons-configuration2.version>2.15.1</commons-configuration2.version>
     <!-- Test Versions -->
     <awaitility-test.version>3.1.6</awaitility-test.version>
     <embedded-redis-test.version>0.7.3</embedded-redis-test.version>
@@ -44,20 +46,11 @@
     <powermock-test.version>2.0.9</powermock-test.version>
     <!-- Plugin Versions -->
     <surefire-plugin.version>3.0.0</surefire-plugin.version>
-    <jacoco-plugin.version>0.8.12</jacoco-plugin.version>
   </properties>
 
   <dependencyManagement>
     <dependencies>
       <!-- BOMs listed in the order of their dependency hierarchy or importance.  -->
-      <!-- netty-bom first so lettuce 7.x gets Netty 4.2+ (core-lib-azure BOM below pins 4.1.x) -->
-      <dependency>
-        <groupId>io.netty</groupId>
-        <artifactId>netty-bom</artifactId>
-        <version>${netty.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
       <dependency>
         <groupId>org.opengroup.osdu</groupId>
         <artifactId>core-lib-azure</artifactId>
@@ -270,6 +263,27 @@
         </executions>
       </plugin>
 
+      <!-- Enforcer Plugin: gremlin-shaded-fix is a fork-owned reactor module (version ${revision}),
+           so exempt it here rather than in the upstream-owned root pom, which upstream syncs overwrite. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-config-hygiene</id>
+            <configuration>
+              <rules>
+                <requireReleaseDeps>
+                  <excludes combine.children="append">
+                    <exclude>org.opengroup.osdu.entitlements.v2:gremlin-shaded-fix</exclude>
+                  </excludes>
+                </requireReleaseDeps>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
       <!-- Surefire Plugin -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -284,7 +298,6 @@
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
-        <version>${jacoco-plugin.version}</version>
         <configuration>
           <excludes>
             <exclude>org/opengroup/osdu/entitlements/v2/azure/EntitlementsV2Application.class</exclude>
