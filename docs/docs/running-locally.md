@@ -13,6 +13,3 @@ The Google Cloud implementation has been moved to [gc-osdu-services](https://com
 ## AWS
 
 The AWS provider has been removed from this repository.
-
-### Integration tests
-- Instructions for running the Azure integration tests in local environment can be found [https://community.opengroup.org/osdu/platform/security-and-compliance/entitlements/-/tree/master/provider/entitlements-v2-azure?ref_type=heads](https://community.opengroup.org/osdu/platform/security-and-compliance/entitlements/-/tree/master/provider/entitlements-v2-azure?ref_type=heads)

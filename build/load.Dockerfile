@@ -10,7 +10,7 @@
 # narrowed to the payload and the three loader files by build/load.Dockerfile.dockerignore,
 # so the provider folders under deployments/scripts/ never reach the build. The loader
 # resolves the payload relative to its own file, so the deployments/ layout is preserved.
-FROM docker.io/library/python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
+FROM docker.io/library/python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir -r deployments/scripts/requirements.txt
 
 COPY deployments/scripts/DeploySharedSchemas.py deployments/scripts/Utility.py deployments/scripts/
 COPY deployments/shared-schemas/ deployments/shared-schemas/
+COPY LICENSE NOTICE NOTICE-OSDU-SPI /licenses/
 COPY --chmod=0755 build/load-entrypoint.sh /usr/local/bin/load-entrypoint.sh
 
 RUN groupadd --system loader && useradd --system --gid loader --home-dir /loader loader

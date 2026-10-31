@@ -9,8 +9,8 @@ service: entitlements-v2
 
 top_level:
   .config: keep
-  data-migration: keep
-  gremlin-shaded-fix: keep
+  data-migration: strip
+  gremlin-shaded-fix: strip
   .dockerignore: keep
   .editorconfig: keep
   .envrc.template: keep
@@ -28,6 +28,7 @@ top_level:
   docs: keep
   pom.xml: keep
   publish.yml: strip
+  schemathesis-tests: keep
   entitlements-v2-acceptance-test: keep
   entitlements-v2-core: keep
   entitlements-v2-core-plus: strip
@@ -68,6 +69,11 @@ fossa_modules:
   entitlements-v2-ibm: strip
   entitlements-v2-jdbc: strip
 
+fork_owned:
+  - provider/entitlements-v2-azure
+  - provider/gremlin-shaded-fix
+  - testing/entitlements-v2-test-azure
+
 expected_kept:
   - pom.xml
   - entitlements-v2-core
@@ -86,7 +92,7 @@ inject_root_pom_azure_profile: |
       <profile>
         <id>azure</id>
         <modules>
-          <module>gremlin-shaded-fix</module>
+          <module>provider/gremlin-shaded-fix</module>
           <module>provider/entitlements-v2-azure</module>
         </modules>
       </profile>
