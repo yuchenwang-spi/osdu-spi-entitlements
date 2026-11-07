@@ -33,7 +33,7 @@ import org.opengroup.osdu.entitlements.v2.model.NodeType;
 import org.opengroup.osdu.entitlements.v2.model.Role;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.junit4.SpringRunner;
 
 import java.util.Arrays;
@@ -50,7 +50,7 @@ public class GraphTraversalSourceUtilServiceTest {
     private GremlinConnector gremlinConnector;
     @Autowired
     private GraphTraversalSourceUtilService graphTraversalSourceUtilService;
-    @MockBean
+    @MockitoBean
     private CacheConfig cacheConfig;
 
     @After

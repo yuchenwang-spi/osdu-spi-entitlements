@@ -37,8 +37,9 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 
-ENGINE_VERSION = "1.1.0"
+ENGINE_VERSION = "1.5.0"
 REPORT_SCHEMA = 1
 
 FACTS_API_VERSION = "spi.osdu.dev/v1"
@@ -48,16 +49,47 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 GROUP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,254}$")
 SECRET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,126}$")
 SUFFIX_RE = re.compile(r"^[A-Za-z0-9._~:/@+-]{1,200}$")
-MAVEN_ARG_RE = re.compile(r"^[^\s\x00-\x1f\x7f]{1,240}$")
+ARG_RE = re.compile(r"^[^\s\x00-\x1f\x7f]{1,240}$")
 PATH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$")
 TEMPLATE_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]{0,127})\}")
 KEYVAULT_SOURCE_RE = re.compile(r"^keyvault:([A-Za-z0-9][A-Za-z0-9-]{0,126})$")
+FORWARD_SOURCE_RE = re.compile(r"^forward:([a-z][a-z0-9-]{0,62}):(host|port)$")
+HOSTNAME_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
+# The lane's host network sees a forward on localhost; a VM-backed engine passes its host alias.
+DEFAULT_FORWARD_HOST = "localhost"
 
-FACT_SOURCES = ("gateway", "partition", "openid", "tenant", "legalTag", "domain")
+FACT_SOURCES = ("gateway", "gatewayHost", "partition", "openid", "tenant", "legalTag", "domain")
+SUITE_TYPES = ("maven", "pytest")
+# Each suite type reads its own argv key; the other type's keys are a contract error.
+TYPE_KEYS = {
+    "maven": ("mavenArguments",),
+    "pytest": ("pytestArguments", "requirements"),
+}
+# Keys a type may not carry at all, even empty.
+TYPE_FORBIDDEN = {
+    "maven": (),
+    "pytest": ("forwards",),
+}
+DEFAULT_ARGUMENTS = {"maven": ["verify"], "pytest": []}
 SUITE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+# In-cluster services a suite may reach through a caller-opened port-forward;
+# the stack publishes each target under `forwards` and grants exactly those.
+FORWARD_NAMES = ("elasticsearch",)
+K8S_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+# Pod names are DNS subdomains: dot-separated labels, at most 253 characters.
+K8S_SUBDOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$")
+# componentGovernance (ADR-047): the OSDU community project the fork is built from,
+# and repository-relative directories with no "." or ".." segment.
+UPSTREAM_URL_RE = re.compile(r"^https://community\.opengroup\.org/osdu(/[A-Za-z0-9_-][A-Za-z0-9._-]*)+$")
+MAVEN_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# A GHCR package name, as Validation's image_name (the fork's SERVICE_NAME variable).
+IMAGE_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$")
+MAX_IGNORE_DIRECTORIES = 32
 VALUE_SOURCES = ("static", "template")
 CALLER_SOURCES = ("user", "token", "memberToken", "noAccessToken")
-SOURCE_VOCABULARY = FACT_SOURCES + VALUE_SOURCES + CALLER_SOURCES + ("keyvault:<name>",)
+SOURCE_VOCABULARY = FACT_SOURCES + VALUE_SOURCES + CALLER_SOURCES + (
+    "keyvault:<name>", "forward:<target>:host", "forward:<target>:port")
 # The bearers the caller minted for this run; the inputs the resolver takes from
 # its own reserved prefix rather than from a binding name.
 TOKEN_ENV = "RESOLVER_TOKEN"
@@ -76,6 +108,7 @@ TOKEN_SOURCES = {
 # publish yet resolves as env-not-ready.
 FACT_PATHS = {
     "gateway": ("base_url",),
+    "gatewayHost": ("base_url",),
     "openid": ("azure", "openid_issuer"),
     "tenant": ("azure", "tenant_id"),
     "domain": ("entitlements_domain",),
@@ -336,6 +369,53 @@ def _slug_list(value, where, pattern, label):
     return value
 
 
+def _repo_dir(value, where):
+    if (not isinstance(value, str) or not PATH_RE.fullmatch(value) or value.endswith("/")
+            or any(part in ("", ".", "..") for part in value.split("/"))):
+        raise Halt("DESCRIPTOR_INVALID", f"{where}: '{value}' is not a repository-relative directory")
+    return value
+
+
+def validate_component_governance(cg):
+    """The optional componentGovernance section (ADR-047). The resolver only validates it;
+    the component governance pipeline reads it."""
+    where = "descriptor.componentGovernance"
+    if not isinstance(cg, dict):
+        raise Halt("DESCRIPTOR_INVALID", f"{where} must be a mapping")
+    _require_keys(cg, ("upstream", "image", "module", "profiles", "ignoreDirectories"), ("upstream",), where)
+    upstream = _string_field(cg, "upstream", where)
+    if not UPSTREAM_URL_RE.fullmatch(upstream) or upstream.endswith(".git"):
+        raise Halt("DESCRIPTOR_INVALID",
+                   f"{where}.upstream must be an OSDU community project URL without .git, "
+                   f"https://community.opengroup.org/osdu/...: {upstream}")
+    if "image" in cg and not IMAGE_NAME_RE.fullmatch(_string_field(cg, "image", where)):
+        raise Halt("DESCRIPTOR_INVALID",
+                   f"{where}.image must be a lowercase GHCR package name: {cg['image']}")
+    if "module" in cg:
+        _repo_dir(cg["module"], f"{where}.module")
+    if "profiles" in cg:
+        profiles = _slug_list(cg["profiles"], f"{where}.profiles", MAVEN_PROFILE_RE, "Maven profile id")
+        if not profiles:
+            raise Halt("DESCRIPTOR_INVALID", f"{where}.profiles must name at least one profile")
+    if "ignoreDirectories" in cg:
+        dirs = cg["ignoreDirectories"]
+        if dirs == {}:
+            dirs = []
+        if not isinstance(dirs, list):
+            raise Halt("DESCRIPTOR_INVALID", f"{where}.ignoreDirectories must be a list")
+        if len(dirs) > MAX_IGNORE_DIRECTORIES:
+            raise Halt("DESCRIPTOR_INVALID",
+                       f"{where}.ignoreDirectories names more than {MAX_IGNORE_DIRECTORIES} directories")
+        for index, item in enumerate(dirs):
+            _repo_dir(item, f"{where}.ignoreDirectories[{index}]")
+        if len(set(dirs)) != len(dirs):
+            raise Halt("DESCRIPTOR_INVALID", f"{where}.ignoreDirectories lists a directory twice")
+        module = cg.get("module")
+        if module and any(module == d or module.startswith(d + "/") for d in dirs):
+            raise Halt("DESCRIPTOR_INVALID", f"{where}.ignoreDirectories must not contain the module {module}")
+    return cg
+
+
 def _validate_binding(name, binding, where):
     if not isinstance(binding, dict):
         raise Halt("DESCRIPTOR_INVALID", f"{where} must be a mapping")
@@ -345,7 +425,9 @@ def _validate_binding(name, binding, where):
         raise Halt("DESCRIPTOR_INVALID", f"{where}.source must be a string")
 
     keyvault = KEYVAULT_SOURCE_RE.fullmatch(source)
-    if source not in FACT_SOURCES + VALUE_SOURCES + CALLER_SOURCES and not keyvault:
+    forward = FORWARD_SOURCE_RE.fullmatch(source)
+    if source not in FACT_SOURCES + VALUE_SOURCES + CALLER_SOURCES and not keyvault \
+            and not forward:
         raise Halt(
             "UNKNOWN_SOURCE",
             f"{where}.source '{source}' is not in the source vocabulary: "
@@ -373,6 +455,9 @@ def _validate_binding(name, binding, where):
                    f"{where}.value is only valid for sources static and template")
 
     if "default" in binding:
+        if forward:
+            raise Halt("DESCRIPTOR_INVALID",
+                       f"{where}.default is not valid for source {source}")
         if keyvault or source in TOKEN_SOURCES:
             # A default for a secret would put a secret value in the repository.
             raise Halt("DESCRIPTOR_INVALID",
@@ -395,7 +480,7 @@ def _validate_binding(name, binding, where):
 
 
 def validate_descriptor(data, suite="acceptance"):
-    _require_keys(data, ("schemaVersion", "service", "tests"),
+    _require_keys(data, ("schemaVersion", "service", "tests", "componentGovernance"),
                   ("schemaVersion", "service", "tests"), "descriptor")
     version = data["schemaVersion"]
     if version != 3:
@@ -418,10 +503,22 @@ def validate_descriptor(data, suite="acceptance"):
             raise Halt("DESCRIPTOR_INVALID",
                        "descriptor.service.description exceeds 200 characters, "
                        "the published schema maximum")
+    if "componentGovernance" in data:
+        validate_component_governance(data["componentGovernance"])
 
     tests = data["tests"]
     if not isinstance(tests, dict):
         raise Halt("DESCRIPTOR_INVALID", "descriptor.tests must be a mapping")
+    if not tests:
+        # Deploy only: the lane borrows, verifies the rollout and restores with no suite to run.
+        return {
+            "service": service["name"], "suite": None, "suites": {}, "suite_specs": {},
+            "test_type": None,
+            "test_dir": None, "arguments": [], "maven_arguments": [], "requirements": [],
+            "bindings": {}, "sources": {},
+            "key_vault_bindings": {}, "requires": {"loads": [], "groups": []},
+            "dependencies": [], "forwards": [], "timeout_minutes": None,
+        }
     if "acceptance" not in tests:
         raise Halt("MISSING_KEY", "descriptor.tests.acceptance is required")
     suites = {}
@@ -434,9 +531,23 @@ def validate_descriptor(data, suite="acceptance"):
         raise Halt("DESCRIPTOR_INVALID",
                    f"descriptor.tests declares no suite named '{suite}'; "
                    "declared: " + ", ".join(sorted(suites)))
+    # The image keys its runner and virtual environment by path, so a shared path needs one spec.
+    by_path = {}
+    for name in sorted(suites):
+        spec = (suites[name]["test_type"], suites[name]["requirements"])
+        first, first_spec = by_path.setdefault(suites[name]["test_dir"], (name, spec))
+        if spec != first_spec:
+            raise Halt("DESCRIPTOR_INVALID",
+                       f"descriptor.tests.{name} shares path '{suites[name]['test_dir']}' with "
+                       f"tests.{first} but differs in type or requirements")
     contract = dict(suites[suite])
     contract["suite"] = suite
     contract["suites"] = {name: suites[name]["test_dir"] for name in sorted(suites)}
+    contract["suite_specs"] = {
+        name: {"path": suites[name]["test_dir"], "type": suites[name]["test_type"],
+               "requirements": suites[name]["requirements"]}
+        for name in sorted(suites)
+    }
     return contract
 
 
@@ -446,25 +557,50 @@ def _validate_suite(service_name, suite_name, acceptance):
     where = f"descriptor.tests.{suite_name}"
     _require_keys(
         acceptance,
-        ("type", "path", "mavenArguments", "bindings", "keyVaultBindings",
-         "requires", "dependencies", "timeoutMinutes"),
+        ("type", "path", "mavenArguments", "pytestArguments", "requirements", "bindings",
+         "keyVaultBindings", "requires", "dependencies", "forwards", "timeoutMinutes"),
         ("type", "path"),
         where,
     )
-    if acceptance["type"] != "maven":
-        raise Halt("DESCRIPTOR_INVALID", f"{where}.type must be maven")
+    test_type = acceptance["type"]
+    if test_type not in SUITE_TYPES:
+        raise Halt("DESCRIPTOR_INVALID",
+                   f"{where}.type must be one of: " + ", ".join(SUITE_TYPES))
+    for other, keys in TYPE_KEYS.items():
+        for key in keys:
+            if other != test_type and key in acceptance:
+                raise Halt("DESCRIPTOR_INVALID",
+                           f"{where}.{key} is only valid for type {other}")
+    for key in TYPE_FORBIDDEN[test_type]:
+        if key in acceptance:
+            raise Halt("DESCRIPTOR_INVALID", f"{where}.{key} is only valid for type maven")
     path = _string_field(acceptance, "path", where, PATH_RE)
     if ".." in path.split("/"):
         raise Halt("DESCRIPTOR_INVALID", f"{where}.path must stay inside the repository")
 
-    maven_arguments = acceptance.get("mavenArguments", ["verify"])
-    if not isinstance(maven_arguments, list) or not maven_arguments:
-        raise Halt("DESCRIPTOR_INVALID", f"{where}.mavenArguments must be a non-empty list")
-    for position, argument in enumerate(maven_arguments):
-        if not isinstance(argument, str) or not MAVEN_ARG_RE.fullmatch(argument):
+    arguments_key = TYPE_KEYS[test_type][0]
+    arguments = acceptance.get(arguments_key, DEFAULT_ARGUMENTS[test_type])
+    if not isinstance(arguments, list) or (test_type == "maven" and not arguments):
+        raise Halt("DESCRIPTOR_INVALID", f"{where}.{arguments_key} must be a "
+                   + ("non-empty list" if test_type == "maven" else "list"))
+    for position, argument in enumerate(arguments):
+        if not isinstance(argument, str) or not ARG_RE.fullmatch(argument):
             raise Halt("DESCRIPTOR_INVALID",
-                       f"{where}.mavenArguments[{position}] must be one argv token "
+                       f"{where}.{arguments_key}[{position}] must be one argv token "
                        "with no whitespace")
+
+    requirements = []
+    if test_type == "pytest":
+        requirements = acceptance.get("requirements", ["requirements.txt"])
+        if not isinstance(requirements, list) or not requirements:
+            raise Halt("DESCRIPTOR_INVALID", f"{where}.requirements must be a non-empty list")
+        for position, item in enumerate(requirements):
+            if not isinstance(item, str) or not PATH_RE.fullmatch(item) \
+                    or ".." in item.split("/"):
+                raise Halt("DESCRIPTOR_INVALID",
+                           f"{where}.requirements[{position}] must be a path inside the suite")
+        if len(set(requirements)) != len(requirements):
+            raise Halt("DESCRIPTOR_INVALID", f"{where}.requirements lists a file twice")
 
     bindings = acceptance.get("bindings", {})
     if not isinstance(bindings, dict):
@@ -516,20 +652,41 @@ def _validate_suite(service_name, suite_name, acceptance):
     dependencies = _slug_list(acceptance.get("dependencies", []),
                               f"{where}.dependencies", SLUG_RE, "service slug")
 
+    forwards = acceptance.get("forwards", [])
+    if not isinstance(forwards, list):
+        raise Halt("DESCRIPTOR_INVALID", f"{where}.forwards must be a list")
+    for item in forwards:
+        if not isinstance(item, str) or item not in FORWARD_NAMES:
+            raise Halt("DESCRIPTOR_INVALID",
+                       f"{where}.forwards: '{item}' is not a forward target; "
+                       "known: " + ", ".join(FORWARD_NAMES))
+    if len(set(forwards)) != len(forwards):
+        raise Halt("DESCRIPTOR_INVALID", f"{where}.forwards lists a target twice")
+
+    for name, source in sources.items():
+        forward = FORWARD_SOURCE_RE.fullmatch(source)
+        if forward and forward.group(1) not in forwards:
+            raise Halt("DESCRIPTOR_INVALID",
+                       f"{where}.bindings.{name} binds forward '{forward.group(1)}', "
+                       f"which {where}.forwards does not declare")
+
     timeout = acceptance.get("timeoutMinutes", 25)
     if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 180:
         raise Halt("DESCRIPTOR_INVALID", f"{where}.timeoutMinutes must be between 1 and 180")
 
     return {
         "service": service_name,
-        "test_type": acceptance["type"],
+        "test_type": test_type,
         "test_dir": path,
-        "maven_arguments": maven_arguments,
+        "arguments": arguments,
+        "maven_arguments": arguments if test_type == "maven" else [],
+        "requirements": requirements,
         "bindings": bindings,
         "sources": sources,
         "key_vault_bindings": key_vault_bindings,
         "requires": requires,
         "dependencies": dependencies,
+        "forwards": forwards,
         "timeout_minutes": timeout,
     }
 
@@ -652,7 +809,7 @@ def check_agreement(facts, expect_gateway, expect_partition):
     return checks
 
 
-def resolve(contract, facts, secrets, environ):
+def resolve(contract, facts, secrets, environ, forward_host=DEFAULT_FORWARD_HOST):
     resolved = {}
     missing = []
 
@@ -675,7 +832,18 @@ def resolve(contract, facts, secrets, environ):
             resolved[name] = override
             continue
         keyvault = KEYVAULT_SOURCE_RE.fullmatch(source)
-        if keyvault:
+        forward = FORWARD_SOURCE_RE.fullmatch(source)
+        if forward:
+            target = facts.get("forwards", {}).get(forward.group(1)) \
+                if isinstance(facts.get("forwards"), dict) else None
+            port = target.get("port") if isinstance(target, dict) else None
+            if not isinstance(port, int) or isinstance(port, bool):
+                miss(name, f"the environment publishes no forward target for '{forward.group(1)}'")
+            elif forward.group(2) == "host":
+                resolved[name] = forward_host
+            else:
+                resolved[name] = str(port)
+        elif keyvault:
             # kv_name is the vault entry's NAME from the descriptor, never a value.
             kv_name = keyvault.group(1)
             if kv_name in secrets:
@@ -697,6 +865,14 @@ def resolve(contract, facts, secrets, environ):
                 miss(name, f"source {source}: set {env_name} to {who}")
         else:
             base = fact_value(facts, source)
+            if base and source == "gatewayHost":
+                try:
+                    host = urllib.parse.urlsplit(base).netloc
+                except ValueError:
+                    host = ""
+                if not host:
+                    raise Infra("FACTS_INVALID", f"facts value at 'base_url' has no host: {base!r}")
+                base = host
             if base:
                 if source == "gateway":
                     base = base.rstrip("/")
@@ -764,7 +940,32 @@ def load_secrets(path):
 # ---------------------------------------------------------------------------
 # Entry point
 
-def build_report(mode, contract, facts, resolved, missing, agreement):
+def forward_targets(contract, facts):
+    """The published target for each forward the suite declares, and the names
+    the environment does not publish. A malformed target is an infra failure."""
+    published = facts.get("forwards", {}) if isinstance(facts, dict) else {}
+    if not isinstance(published, dict):
+        raise Infra("FACTS_MALFORMED", "facts.forwards must be an object")
+    targets, unpublished = [], []
+    for name in contract["forwards"]:
+        target = published.get(name)
+        if target is None:
+            unpublished.append(name)
+            continue
+        if not isinstance(target, dict):
+            raise Infra("FACTS_MALFORMED", f"facts.forwards.{name} must be an object")
+        namespace, pod, port = target.get("namespace"), target.get("pod"), target.get("port")
+        if not (isinstance(namespace, str) and K8S_NAME_RE.fullmatch(namespace)
+                and isinstance(pod, str) and K8S_SUBDOMAIN_RE.fullmatch(pod)
+                and isinstance(port, int) and not isinstance(port, bool)
+                and 1 <= port <= 65535):
+            raise Infra("FACTS_MALFORMED",
+                        f"facts.forwards.{name} needs a namespace, a pod, and a port")
+        targets.append({"name": name, "namespace": namespace, "pod": pod, "port": port})
+    return targets, unpublished
+
+
+def build_report(mode, contract, facts, resolved, missing, agreement, forwards=()):
     return {
         "engine_version": ENGINE_VERSION,
         "report_schema": REPORT_SCHEMA,
@@ -773,13 +974,18 @@ def build_report(mode, contract, facts, resolved, missing, agreement):
         "contract": {
             "suite": contract["suite"],
             "suites": contract["suites"],
+            "suite_specs": contract["suite_specs"],
             "test_type": contract["test_type"],
             "test_dir": contract["test_dir"],
+            "arguments": contract["arguments"],
             "maven_arguments": contract["maven_arguments"],
+            "requirements": contract["requirements"],
             "timeout_minutes": contract["timeout_minutes"],
             "requires": contract["requires"],
             "dependencies": contract["dependencies"],
+            "forwards": contract["forwards"],
         },
+        "forwards": list(forwards),
         "key_vault": {
             "vault": _require_printable_fact(
                 "keyvault", _fact_at(facts, VAULT_NAME_PATH)).strip(),
@@ -846,10 +1052,15 @@ def main(argv=None):
     parser.add_argument("--report", default="")
     parser.add_argument("--suite", default="acceptance",
                         help="which descriptor.tests suite to resolve (default: acceptance)")
+    parser.add_argument("--forward-host", default=DEFAULT_FORWARD_HOST,
+                        help="the host a forward:<target>:host binding resolves to "
+                             f"(default: {DEFAULT_FORWARD_HOST})")
     parser.add_argument("--contract-only", action="store_true",
                         help="validate the descriptor and report the contract; "
                              "no facts, no resolution, no env file")
     args = parser.parse_args(argv)
+    if not HOSTNAME_RE.fullmatch(args.forward_host):
+        parser.error("--forward-host must be a hostname")
     if args.contract_only:
         args.mode = "contract-only"
     elif not (args.mode and args.facts and args.env_file):
@@ -882,17 +1093,27 @@ def main(argv=None):
             report = build_report(args.mode, contract, {}, {}, [], [])
             write_report(args.report, report)
             print(f"contract validated for service '{contract['service']}' "
-                  f"(suite: {contract['test_dir']})")
+                  f"(suite: {contract['test_dir'] or 'none, deploy only'})")
             return 0
+        if not contract["suites"]:
+            raise Halt("DESCRIPTOR_INVALID",
+                       "descriptor.tests is empty (deploy only); there is no suite to resolve")
         facts = load_facts(args.facts)
         secrets = load_secrets(args.secrets)
         agreement = check_agreement(facts, args.expect_gateway, args.expect_partition)
-        resolved, missing = resolve(contract, facts, secrets, os.environ)
-        report = build_report(args.mode, contract, facts, resolved, missing, agreement)
+        resolved, missing = resolve(contract, facts, secrets, os.environ, args.forward_host)
+        forwards, unpublished = forward_targets(contract, facts)
+        report = build_report(args.mode, contract, facts, resolved, missing, agreement, forwards)
 
+        if unpublished and args.mode == "run":
+            raise EnvNotReady("the environment publishes no forward target for: "
+                              + ", ".join(unpublished))
         if missing and args.mode == "run":
             names = ", ".join(entry["name"] for entry in missing)
             raise EnvNotReady(f"unresolved required bindings: {names}")
+        for name in unpublished:
+            print(f"warning: forward {name}: the environment publishes no target",
+                  file=sys.stderr)
 
         for entry in missing:
             print(f"warning: {entry['name']}: {entry['reason']}", file=sys.stderr)

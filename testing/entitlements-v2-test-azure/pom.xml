@@ -5,21 +5,21 @@
     <parent>
         <groupId>org.opengroup.osdu.entitlements.v2</groupId>
         <artifactId>os-entitlements-v2-testing</artifactId>
-        <version>0.31.0-SNAPSHOT</version>
+        <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>entitlements-v2-test-azure</artifactId>
-    <version>0.31.0-SNAPSHOT</version>
+    <version>${revision}</version>
     <packaging>jar</packaging>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.main.basedir>${project.basedir}</project.main.basedir>
-        <jackson.version>2.21.7</jackson.version>
+        <jackson.version>2.21.8</jackson.version>
         <core-lib-azure.version>0.26.0</core-lib-azure.version>
         <junit.version>4.13.2</junit.version>
-        <netty-all.version>4.1.138.Final</netty-all.version>
+        <netty-all.version>4.1.139.Final</netty-all.version>
     </properties>
 
     <dependencyManagement>
@@ -40,7 +40,7 @@
         <dependency>
             <groupId>org.opengroup.osdu.entitlements.v2</groupId>
             <artifactId>entitlements-v2-test-core</artifactId>
-            <version>0.31.0-SNAPSHOT</version>
+            <version>${revision}</version>
         </dependency>
 
         <!-- Tests -->

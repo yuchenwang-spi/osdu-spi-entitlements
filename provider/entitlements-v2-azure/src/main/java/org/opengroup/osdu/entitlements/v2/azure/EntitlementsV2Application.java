@@ -17,14 +17,18 @@ package org.opengroup.osdu.entitlements.v2.azure;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-@ComponentScan({
+@ComponentScan(basePackages = {
         "org.opengroup.osdu.core",
         "org.opengroup.osdu.azure",
         "org.opengroup.osdu.entitlements.v2"
+}, excludeFilters = {
+        // core-lib-azure 4.x extends a Boot 3 actuator class that Boot 4 moved; matched by name so the class is never loaded.
+        @ComponentScan.Filter(type = FilterType.REGEX, pattern = "org\\.opengroup\\.osdu\\.azure\\.health\\.AzureHealthEndpointWebExtension")
 })
 @SpringBootApplication
 @EnableAsync

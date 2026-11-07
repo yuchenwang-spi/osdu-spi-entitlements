@@ -25,8 +25,8 @@ import org.opengroup.osdu.entitlements.v2.model.ParentReferences;
 import org.opengroup.osdu.entitlements.v2.service.HealthService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.junit4.SpringRunner;
 import redis.embedded.RedisServer;
 
@@ -37,13 +37,13 @@ public class HealthServiceAzureTest {
     @Autowired
     private HealthService healthService;
 
-    @MockBean
+    @MockitoBean
     private CacheConfig cacheConfig;
 
-    @MockBean
+    @MockitoBean
     private IRedisClientFactory redisClientFactory;
 
-    @SpyBean
+    @MockitoSpyBean
     private IRedisCache<String, ParentReferences> redisGroupCache;
 
     private static RedisServer redisServer;

@@ -6,8 +6,9 @@ updates:
 
   - package-ecosystem: "maven"
     directories:
-      - "/provider/*-azure"
-      - "/testing/*-test-azure"
+      - "/provider/entitlements-v2-azure"
+      - "/provider/gremlin-shaded-fix"
+      - "/testing/entitlements-v2-test-azure"
     schedule:
       interval: "weekly"
       day: "monday"
