@@ -17,7 +17,7 @@ package org.opengroup.osdu.entitlements.v2.azure.config;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 
 /**
  * Task scheduler dedicated to Gremlin token refresh and retry work.

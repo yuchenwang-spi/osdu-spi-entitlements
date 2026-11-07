@@ -31,8 +31,8 @@ import org.opengroup.osdu.entitlements.v2.azure.config.GremlinTaskScheduler;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
