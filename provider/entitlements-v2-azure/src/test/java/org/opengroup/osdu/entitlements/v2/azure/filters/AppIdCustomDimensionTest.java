@@ -14,7 +14,7 @@
 
 package org.opengroup.osdu.entitlements.v2.azure.filters;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.microsoft.applicationinsights.web.internal.RequestTelemetryContext;
 import com.microsoft.applicationinsights.web.internal.ThreadContext;
 import org.junit.Assert;
@@ -37,8 +37,8 @@ import org.opengroup.osdu.entitlements.v2.model.addmember.AddMemberDto;
 import org.opengroup.osdu.entitlements.v2.service.AddMemberService;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit4.SpringRunner;
@@ -57,17 +57,17 @@ public class AppIdCustomDimensionTest {
     private MockMvc mockMvc;
     @Autowired
     private ObjectMapper objectMapper;
-    @MockBean
+    @MockitoBean
     private AddMemberService service;
-    @MockBean
+    @MockitoBean
     private JaxRsDpsLog logger;
-    @MockBean
+    @MockitoBean
     private ITenantFactory tenantFactory;
-    @MockBean
+    @MockitoBean
     private AuthorizationService authService;
-    @MockBean
+    @MockitoBean
     private CacheConfig cacheConfig;
-    @MockBean
+    @MockitoBean
     private AzureAppProperties azureAppProperties;
 
     @Test

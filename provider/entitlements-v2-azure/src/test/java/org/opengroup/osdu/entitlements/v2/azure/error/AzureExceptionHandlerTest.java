@@ -44,7 +44,7 @@ public class AzureExceptionHandlerTest {
 
         ResponseEntity<AppError> response = azureExceptionHandler.handleNoHostAvailableException(exception);
 
-        assertEquals(503, response.getStatusCodeValue());
+        assertEquals(503, response.getStatusCode().value());
         assertNotNull(response.getBody());
         AppError body = response.getBody();
         assertEquals(503, body.getCode());

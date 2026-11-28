@@ -39,6 +39,7 @@ python3 resolve.py --mode {bind|run}
                    --env-file <out.env>
                    [--suite <name>]
                    [--secrets <name-to-value.json>]
+                   [--forward-host <host>]
                    [--expect-gateway <url>]
                    [--expect-partition <name>]
                    [--report <path>]
@@ -58,6 +59,9 @@ suite's path) with no facts, no resolution, and no env file. It is how the
 build lane reads the descriptor where no environment exists, to select the
 suite modules the acceptance image bakes, and how the deploy lane enumerates
 the suites to run. Descriptor violations exit 2 exactly as in the full modes.
+`--forward-host` is the host `forward:<target>:host` bindings resolve to,
+`localhost` by default; a caller whose container engine runs in a VM passes the
+engine's host alias (`host.docker.internal`, `host.containers.internal`).
 
 ## Modes: two audiences
 
@@ -74,12 +78,15 @@ naming the offending key — the resolver refuses to guess.
 | Source | Resolves to |
 | --- | --- |
 | `gateway` | `base_url` from facts, trailing slash stripped, then `suffix` appended |
+| `gatewayHost` | The host and port of `base_url`, without scheme or path, then `suffix` appended |
 | `partition` | The primary entry's `name` in `partitions[]` |
 | `openid` | `azure.openid_issuer` — the OIDC v2.0 issuer URL, published explicitly by the stack, never derived from the tenant id here |
 | `tenant` | `azure.tenant_id` |
 | `legalTag` | The primary entry's `legal_tag` in `partitions[]` (legal tags are partition-scoped) |
 | `domain` | `entitlements_domain` — the entitlements domain the stack deployed |
 | `keyvault:<name>` | The value of that secret from the caller's secrets file; the vault itself is named by `azure.keyvault` in facts |
+| `forward:<target>:host` | `--forward-host`, `localhost` unless the caller names another. The suite must declare the target in `forwards` |
+| `forward:<target>:port` | The port the stack publishes for that target under `forwards` in facts. No `default`: an unpublished target is env-not-ready in run mode |
 | `static` | The declared `value`, verbatim |
 | `template` | The declared `value` with `${NAME}` references to other bindings, rendered after everything else resolves; may only reference non-template, non-secret bindings |
 | `user` | Nothing — the caller's environment must supply it (or a declared `default`) |
@@ -126,9 +133,14 @@ by design.
   `AZURE_FEDERATED_TOKEN_FILE`, plus process basics such as `PATH`, `HOME`,
   `LD_PRELOAD`, `MAVEN_OPTS`) and prefixes (`ACTIONS_`, `GITHUB_`, `RESOLVER_`, `RUNNER_`,
   `SPI_STACK_`).
-- **`mavenArguments` is an argv array.** Each token must be free of
-  whitespace and control characters; consumers pass the decoded array
-  directly to Maven and never evaluate it as a shell string.
+- **`mavenArguments` and `pytestArguments` are argv arrays.** Each token must
+  be free of whitespace and control characters; consumers pass the decoded
+  array directly to the runner and never evaluate it as a shell string.
+- **Suite type decides the keys.** `type` is `maven` or `pytest` (ADR-044).
+  `mavenArguments` is Maven-only; `pytestArguments` and `requirements` (files
+  relative to the suite path, default `requirements.txt`) are pytest-only;
+  `forwards` is Maven-only. The report's `arguments` carries either type's
+  argv, and `maven_arguments` stays for existing consumers, empty for pytest.
 - **Secret values can never live in the descriptor**: `keyvault:` sources
   take no `default` and no `value`; `keyVaultBindings` map to secret names
   only.
@@ -151,20 +163,28 @@ Written to `--report` (and always attempted, even on failure):
 
 ```json
 {
-  "engine_version": "1.1.0",
+  "engine_version": "1.5.0",
   "report_schema": 1,
   "mode": "bind",
   "service": "partition",
   "contract": {
     "suite": "acceptance",
     "suites": {"acceptance": "partition-acceptance-test", "integration": "testing"},
+    "suite_specs": {
+      "acceptance": {"path": "partition-acceptance-test", "type": "maven", "requirements": []},
+      "integration": {"path": "testing", "type": "maven", "requirements": []}
+    },
     "test_type": "maven",
     "test_dir": "partition-acceptance-test",
+    "arguments": ["verify"],
     "maven_arguments": ["verify"],
+    "requirements": [],
     "timeout_minutes": 25,
     "requires": {"loads": [], "groups": []},
-    "dependencies": []
+    "dependencies": [],
+    "forwards": []
   },
+  "forwards": [],
   "key_vault": {"vault": "kv-name-from-facts", "secret_names": []},
   "agreement_checked": ["gateway"],
   "resolved_names": ["MY_TENANT", "PARTITION_BASE_URL"],
@@ -182,7 +202,7 @@ follows the category.
 # .spi/service.yaml — fork-owned, reviewed with the code, survives any stack rehome
 schemaVersion: 3
 service: { name: partition, archetype: java-maven-azure }
-tests:                                  # named suites of one shape; acceptance is required
+tests:                                  # named suites of one shape; acceptance is required unless the map is empty (deploy only)
   acceptance:
     type: maven
     path: partition-acceptance-test     # upstream-maintained module, kept by the filter
@@ -200,6 +220,7 @@ tests:                                  # named suites of one shape; acceptance 
       loads: []
       groups: []
     dependencies: []                    # sibling services this suite calls
+    forwards: []                        # in-cluster services the lane port-forwards to (elasticsearch)
     timeoutMinutes: 25
   integration:                          # a fork-owned suite, selected with --suite integration
     type: maven
@@ -215,6 +236,11 @@ Suite names are lowercase slugs. The formal contract is `service-descriptor.sche
 descriptor accepts a fixed YAML subset (block and flow mappings/lists, quoted
 or plain scalars, comments — no anchors, no multi-line scalars, no tabs),
 parsed by the engine itself so the contract never depends on the runner image.
+
+The descriptor may also carry a `componentGovernance` section, the inputs of the Component
+Governance pipeline (ADR-047, [`component-governance`](../component-governance/README.md)). The
+engine validates its shape so that one closed contract covers the whole file, and does not read it
+when it resolves a suite.
 
 ## Local testing
 

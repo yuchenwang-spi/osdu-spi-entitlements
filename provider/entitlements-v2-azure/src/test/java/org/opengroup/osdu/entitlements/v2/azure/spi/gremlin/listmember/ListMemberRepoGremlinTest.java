@@ -37,7 +37,7 @@ import org.opengroup.osdu.entitlements.v2.model.listmember.ListMemberServiceDto;
 import org.opengroup.osdu.entitlements.v2.spi.listmember.ListMemberRepo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.junit4.SpringRunner;
 
 import java.util.List;
@@ -55,19 +55,19 @@ public class ListMemberRepoGremlinTest {
     @Autowired
     private AddMemberRepoGremlin addMemberRepoGremlin;
 
-    @MockBean
+    @MockitoBean
     private RedisAzureCache<ChildrenReferences> redisMemberCache;
 
-    @MockBean
+    @MockitoBean
     private HitsNMissesMetricService metricService;
 
-    @MockBean
+    @MockitoBean
     private JaxRsDpsLog log;
 
-    @MockBean
+    @MockitoBean
     private AuditLogger auditLogger;
 
-    @MockBean
+    @MockitoBean
     private CacheConfig cacheConfig;
 
     @After
