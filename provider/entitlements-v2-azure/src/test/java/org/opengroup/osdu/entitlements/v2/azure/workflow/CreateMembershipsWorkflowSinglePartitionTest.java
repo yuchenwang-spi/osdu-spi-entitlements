@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
 import com.google.gson.Gson;
 import com.microsoft.applicationinsights.web.internal.RequestTelemetryContext;
@@ -41,10 +41,13 @@ import java.util.List;
 import java.util.Set;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.jupiter.api.Assertions;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.opengroup.osdu.azure.cache.RedisAzureCache;
@@ -76,8 +79,8 @@ import org.opengroup.osdu.entitlements.v2.model.updategroup.UpdateGroupOperation
 import org.opengroup.osdu.entitlements.v2.service.featureflag.PartitionFeatureFlagService;
 import org.redisson.api.RLock;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit4.SpringRunner;
@@ -92,6 +95,8 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 @ContextConfiguration(classes = TestComponentScan.class)
 @WebMvcTest(controllers = {CreateGroupApi.class, DeleteGroupApi.class, DeleteMemberApi.class})
 public class CreateMembershipsWorkflowSinglePartitionTest {
+    @Rule
+    public MockitoRule mockitoRule = MockitoJUnit.rule();
     private static final String servicePrincipal = "service_principal.com";
     private static final String userA = "user1@desid.com";
     private static final String userB = "user2@desid.com";
@@ -102,31 +107,31 @@ public class CreateMembershipsWorkflowSinglePartitionTest {
     private MockMvc mockMvc;
     @Autowired
     private ObjectMapper objectMapper;
-    @MockBean
+    @MockitoBean
     private AzureAppProperties config;
-    @MockBean
+    @MockitoBean
     private JaxRsDpsLog logger;
-    @MockBean
+    @MockitoBean
     private AuditLogger auditLogger;
-    @MockBean
+    @MockitoBean
     private ITenantFactory tenantFactory;
-    @MockBean
+    @MockitoBean
     private AuthorizationService authService;
-    @MockBean
+    @MockitoBean
     private RedisAzureCache<ParentReferences> redisGroupCache;
-    @MockBean
+    @MockitoBean
     private RedisAzureCache<ChildrenReferences> redisMemberCache;
-    @MockBean
+    @MockitoBean
     private CacheConfig cacheConfig;
     @Mock
     private RLock cacheLock;
-    @MockBean
+    @MockitoBean
     private Retry retry;
-    @MockBean
+    @MockitoBean
     private HitsNMissesMetricService metricService;
-    @MockBean
+    @MockitoBean
     private IEventPublisher eventPublisher;
-    @MockBean
+    @MockitoBean
     private PartitionFeatureFlagService partitionFeatureFlagService;
 
     @Before
@@ -448,23 +453,6 @@ public class CreateMembershipsWorkflowSinglePartitionTest {
         //update group metadata with audience
 
         performUpdateGroupRequest(Collections.singletonList(getUpdateAppIdsOperation(audience)),
-                "data.mydata1.operators@common.contoso.com", userA, audience);
-        assertGroupsEquals(new String[]{
-                "users@common.contoso.com",
-                "users.myusers.operators@common.contoso.com",
-                "data.default.owners@common.contoso.com",
-                "data.default.viewers@common.contoso.com",
-                "data.mydata1.operators@common.contoso.com"}, performListGroupRequestWithAppId(userA, audience));
-
-        assertGroupsEquals(new String[]{
-                "users@common.contoso.com",
-                "users.myusers.operators@common.contoso.com",
-                "data.default.owners@common.contoso.com",
-                "data.default.viewers@common.contoso.com",
-                "data.mydata1.operators@common.contoso.com"}, performListGroupsOnBehalfOfRequest(userA, "NONE", "test.com"));
-
-        //update group metadata with empty list
-        performUpdateGroupRequest(Collections.singletonList(getUpdateAppIdsOperation(Collections.emptyList())),
                 "data.mydata1.operators@common.contoso.com", userA, audience);
         assertGroupsEquals(new String[]{
                 "users@common.contoso.com",

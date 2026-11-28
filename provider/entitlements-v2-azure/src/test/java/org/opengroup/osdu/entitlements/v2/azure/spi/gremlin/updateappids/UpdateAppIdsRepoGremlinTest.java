@@ -36,7 +36,7 @@ import org.opengroup.osdu.entitlements.v2.model.Role;
 import org.opengroup.osdu.entitlements.v2.spi.updateappids.UpdateAppIdsRepo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.junit4.SpringRunner;
 
 import java.util.Arrays;
@@ -53,7 +53,7 @@ public class UpdateAppIdsRepoGremlinTest {
     private static final String TEST_PARTITION_ID = "dp";
     private static final String TEST_DOMAIN = TEST_PARTITION_ID + ".contoso.com";
 
-    @MockBean
+    @MockitoBean
     private CacheConfig cacheConfig;
     @Autowired
     private UpdateAppIdsRepo updateAppIdsRepo;

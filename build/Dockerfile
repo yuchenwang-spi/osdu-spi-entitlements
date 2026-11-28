@@ -3,21 +3,38 @@
 # Mirrors the OSDU community service-base-image: the JAR that java-build compiled is copied in
 # via JAR_FILE, and no Maven runs here.
 #
-# Multi-arch base so release images pull natively on Apple Silicon. Dependabot bumps the digest
-# in the template only; template-sync carries it to the forks.
-FROM mcr.microsoft.com/openjdk/jdk:17-azurelinux@sha256:ab77e25da6680869295d1d9f67e6118b9ac275671a7a7920b725b0945eb4710e
+# Multi-arch base so release images pull natively on Apple Silicon. JAVA_VERSION is the release
+# the fork's root pom declares (java-release action); one stage per release keeps each digest on
+# a FROM line where Dependabot bumps it in the template, and template-sync carries it to the forks.
+ARG JAVA_VERSION=17
+FROM mcr.microsoft.com/openjdk/jdk:17-azurelinux@sha256:db43ef8a65504de9a800d098ee552cc27ef9be6185af46c12802f8f3a807144d AS runtime-17
+FROM mcr.microsoft.com/openjdk/jdk:25-azurelinux@sha256:23fd23f07f78a7044404a5700cdfd85d7e07700faf59d6ef4a3f30e57c63a1b2 AS runtime-25
+
+# The MCR base does not bundle the App Insights agent that OSDU's base image did, so it is
+# fetched here, on the builder's platform so the arm64 leg needs no emulation, and its bundled
+# license and notice files are read out of the same verified bytes. Bumping the version means
+# updating the checksum.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/openjdk/jdk:17-azurelinux@sha256:db43ef8a65504de9a800d098ee552cc27ef9be6185af46c12802f8f3a807144d AS agent
+ARG APPLICATIONINSIGHTS_AGENT_VERSION="3.7.8"
+ADD --checksum=sha256:e8c494f3f9a36f6b99790a4741b03f51988dc5c4244c14cc24be51874ef72e6b \
+    https://repo1.maven.org/maven2/com/microsoft/azure/applicationinsights-agent/${APPLICATIONINSIGHTS_AGENT_VERSION}/applicationinsights-agent-${APPLICATIONINSIGHTS_AGENT_VERSION}.jar \
+    /agent/applicationinsights-agent.jar
+WORKDIR /agent/notices
+RUN jar tf ../applicationinsights-agent.jar | grep -iE 'license|notice' | grep -v '/$' \
+      | xargs jar xf ../applicationinsights-agent.jar \
+    && test -f META-INF/LICENSE
+
+FROM runtime-${JAVA_VERSION}
 
 ARG JAR_FILE
 ARG APPLICATIONINSIGHTS_CONNECTION_STRING="dummy"
 ARG AZURE_MSI_ENABLED="true"
 ARG JAVA_OPTS=""
-# The MCR base does not bundle the App Insights agent that OSDU's base image did, so it is
-# fetched to the same /opt/agents/ path. Bumping the version means updating the checksum.
-# ADD rather than RUN keeps the arm64 leg free of emulation.
-ARG APPLICATIONINSIGHTS_AGENT_VERSION="3.7.8"
-ADD --checksum=sha256:e8c494f3f9a36f6b99790a4741b03f51988dc5c4244c14cc24be51874ef72e6b \
-    https://repo1.maven.org/maven2/com/microsoft/azure/applicationinsights-agent/${APPLICATIONINSIGHTS_AGENT_VERSION}/applicationinsights-agent-${APPLICATIONINSIGHTS_AGENT_VERSION}.jar \
-    /opt/agents/applicationinsights-agent.jar
+
+# Named one by one so a missing file fails the build instead of shipping without it.
+COPY LICENSE NOTICE NOTICE-OSDU-SPI /licenses/
+COPY --from=agent /agent/notices/ /licenses/applicationinsights-agent/
+COPY --from=agent /agent/applicationinsights-agent.jar /opt/agents/applicationinsights-agent.jar
 
 COPY ${JAR_FILE} /app.jar
 COPY --chmod=0755 build/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

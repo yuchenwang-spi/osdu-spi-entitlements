@@ -18,11 +18,13 @@ import org.awaitility.Duration;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.AdditionalAnswers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.mockito.stubbing.Answer;
 import org.opengroup.osdu.azure.cache.RedisAzureCache;
 import org.opengroup.osdu.core.common.logging.JaxRsDpsLog;
@@ -40,7 +42,7 @@ import org.redisson.config.Config;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.TestPropertySource;
@@ -58,6 +60,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
@@ -81,6 +84,8 @@ import static org.mockito.Mockito.when;
         "cache.flush.ttl.jitter=1000"})
 @RunWith(SpringRunner.class)
 public class GroupCacheServiceAzureTest {
+    @Rule
+    public MockitoRule mockitoRule = MockitoJUnit.rule();
     @TestConfiguration
     static class TestConfig {
         @Bean
@@ -101,15 +106,15 @@ public class GroupCacheServiceAzureTest {
     private EntityNode requester1;
     private EntityNode requester2;
 
-    @MockBean
+    @MockitoBean
     private RetrieveGroupRepo retrieveGroupRepo;
-    @MockBean
+    @MockitoBean
     private HitsNMissesMetricService metricService;
-    @MockBean
+    @MockitoBean
     private RedisAzureCache<ParentReferences> redisGroupCache;
-    @MockBean
+    @MockitoBean
     private JaxRsDpsLog log;
-    @MockBean
+    @MockitoBean
     private CacheConfig cacheConfig;
     @Mock
     private ParentTreeDto parentTreeDto;
@@ -194,12 +199,10 @@ public class GroupCacheServiceAzureTest {
 
     @Test
     public void shouldOnlyOneThreadRebuildCacheInConcurrentScenarioAndOtherThreadWaitAndReturnTheRebuiltCache() throws InterruptedException {
-        List<ParentReferences> cacheValues = new ArrayList<>();
-        for (int i = 0; i < 15; i++) {
-            cacheValues.add(null);
-        }
-        cacheValues.add(this.parentReferences);
-        when(this.redisGroupCache.get("requesterId1-dp")).thenAnswer(AdditionalAnswers.returnsElementsOf(cacheValues));
+        // returnsElementsOf is not thread-safe; concurrent readers can drain the final element
+        AtomicInteger cacheReads = new AtomicInteger();
+        when(this.redisGroupCache.get("requesterId1-dp"))
+                .thenAnswer(invocationOnMock -> cacheReads.incrementAndGet() > 15 ? this.parentReferences : null);
         when(this.retrieveGroupRepo.loadAllParents(this.requester1, false)).thenAnswer((Answer<ParentTreeDto>) invocationOnMock -> {
             await().pollDelay(Duration.FIVE_SECONDS).until(() -> true);
             return parentTreeDto;

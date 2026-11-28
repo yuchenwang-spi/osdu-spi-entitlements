@@ -17,9 +17,10 @@
 # Decides which suite modules the acceptance image bakes and whether it can build
 # at all: every tests.<name>.path the descriptor declares when .spi/service.yaml
 # exists (ADR-040), else the upstream default <service>-acceptance-test. A missing
-# default suite is a clean skip; a broken descriptor, or one naming a suite that
-# is not there, halts with exit 2 rather than guessing. suite_dir is the
-# acceptance suite (the image's run-time default); suite_dirs lists them all.
+# default suite, or a descriptor whose tests map is empty (deploy only), is a clean
+# skip; a broken descriptor, or one naming a suite that is not there, halts with
+# exit 2 rather than guessing. suite_dir is the acceptance suite (the image's
+# run-time default); suite_dirs lists them all.
 #
 # Env: SERVICE_NAME (required), DESCRIPTOR_PATH (default .spi/service.yaml),
 #      RESOLVER (path to the acceptance resolver engine)
@@ -42,15 +43,34 @@ if [[ -f "$DESCRIPTOR_PATH" ]]; then
   REPORT="$(mktemp)"
   trap 'rm -f "$REPORT"' EXIT
   python3 "$RESOLVER" --contract-only --descriptor "$DESCRIPTOR_PATH" --report "$REPORT" > /dev/null
+  if [[ "$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))['contract']['suites']))" "$REPORT")" == "0" ]]; then
+    {
+      echo "suite_dir="
+      echo "suite_dirs="
+      echo "pytest_suites="
+      echo "buildable=false"
+      echo "reason=${DESCRIPTOR_PATH} declares no suite (deploy only)"
+    } >> "${GITHUB_OUTPUT:-/dev/stdout}"
+    echo "ℹ acceptance image skipped: ${DESCRIPTOR_PATH} declares no suite (deploy only)"
+    exit 0
+  fi
   SUITE_DIR="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['contract']['test_dir'])" "$REPORT")"
-  # The acceptance suite leads so it is the image's run-time default.
+  # The acceptance suite leads so it is the image's run-time default. Named suites may share a
+  # path (the engine then requires the same type and requirements), so each path is listed once.
   SUITE_DIRS="$(python3 -c "
 import json, sys
 suites = json.load(open(sys.argv[1]))['contract']['suites']
-print(' '.join([suites['acceptance']] + [d for n, d in sorted(suites.items()) if n != 'acceptance']))" "$REPORT")"
+print(' '.join(dict.fromkeys([suites['acceptance']] + [d for n, d in sorted(suites.items()) if n != 'acceptance'])))" "$REPORT")"
+  # dir=req[,req...] once per pytest suite path; the image installs each into that path's virtual environment.
+  PYTEST_SUITES="$(python3 -c "
+import json, sys
+specs = json.load(open(sys.argv[1]))['contract']['suite_specs']
+print(' '.join(dict.fromkeys(s['path'] + '=' + ','.join(s['requirements'])
+                             for _, s in sorted(specs.items()) if s['type'] == 'pytest')))" "$REPORT")"
   SOURCE="descriptor"
 fi
 
+PYTEST_SUITES="${PYTEST_SUITES:-}"
 BUILDABLE="true"
 REASON=""
 for dir in $SUITE_DIRS; do
@@ -67,9 +87,22 @@ for dir in $SUITE_DIRS; do
   fi
 done
 
+for spec in $PYTEST_SUITES; do
+  dir="${spec%%=*}"
+  [[ -d "$dir" ]] || continue
+  IFS=',' read -r -a files <<< "${spec#*=}"
+  for file in "${files[@]}"; do
+    if [[ ! -f "$dir/$file" ]]; then
+      echo "::error::${DESCRIPTOR_PATH} names requirements '$file' for suite '$dir', which does not exist"
+      exit 2
+    fi
+  done
+done
+
 {
   echo "suite_dir=$SUITE_DIR"
   echo "suite_dirs=$SUITE_DIRS"
+  echo "pytest_suites=$PYTEST_SUITES"
   echo "buildable=$BUILDABLE"
   echo "reason=$REASON"
 } >> "${GITHUB_OUTPUT:-/dev/stdout}"
